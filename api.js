@@ -6,6 +6,7 @@
   const HOST = 'free-api-live-football-data.p.rapidapi.com';
   const BASE = `https://${HOST}`;
   const KEY = 'scorivo_rapidapi_key';
+  const LIVE_PATH = '/football-current-live';
 
   const getKey = () => localStorage.getItem(KEY) || '';
   const today = () => new Date().toISOString().slice(0, 10);
@@ -61,7 +62,7 @@
     document.body.appendChild(modal);
     const input=modal.querySelector('#scKey'),status=modal.querySelector('#scStatus');input.value=getKey();
     btn.onclick=()=>{modal.style.display='flex';input.value=getKey();};modal.querySelector('#scClose').onclick=()=>modal.style.display='none';modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
-    modal.querySelector('#scSave').onclick=async()=>{const v=input.value.trim();if(!v){status.textContent='Paste your RapidAPI key first.';return}localStorage.setItem(KEY,v);status.textContent='Saved. Testing RapidAPI…';clearDemoData();try{await api('/football-get-livescores-matches-events');status.textContent='Connected. Loading real football data…';await refresh(true);modal.style.display='none';toast('SCORIVO is connected to RapidAPI.')}catch(e){status.textContent='Connection failed: '+e.message;clearDemoData();}};
+    modal.querySelector('#scSave').onclick=async()=>{const v=input.value.trim();if(!v){status.textContent='Paste your RapidAPI key first.';return}localStorage.setItem(KEY,v);status.textContent='Saved. Testing RapidAPI…';clearDemoData();try{await api(LIVE_PATH);status.textContent='Connected. Loading real football data…';await refresh(true);modal.style.display='none';toast('SCORIVO is connected to RapidAPI.')}catch(e){status.textContent='Connection failed: '+e.message;clearDemoData();}};
     modal.querySelector('#scClear').onclick=()=>{localStorage.removeItem(KEY);input.value='';status.textContent='Key cleared. Real data only.';clearDemoData();updateBadge();};
   }
 
@@ -87,7 +88,7 @@
   }
 
   async function loadLive(){
-    const data=await api('/football-get-livescores-matches-events');const arr=listFrom(data,['live','response','results','data','events','matches']);const featured=document.querySelector('.featured');if(!featured)return;
+    const data=await api(LIVE_PATH);const arr=listFrom(data,['live','response','results','data','events','matches']);const featured=document.querySelector('.featured');if(!featured)return;
     const label=featured.querySelector('.live-label'),old=featured.querySelector('.match-center'),watch=featured.querySelector('.watch');
     if(!arr.length){if(label)label.innerHTML='<i></i> NO LIVE MATCHES';if(old)old.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:28px 10px;color:#a9c8c5;font-size:13px">There are no live football matches right now.</div>';if(watch)watch.style.display='none';return;}
     const m=normaliseMatch(arr[0]),h=teamName(m.home),a=teamName(m.away),hs=scoreValue(m.score,'home'),as=scoreValue(m.score,'away');
@@ -99,8 +100,6 @@
   }
 
   async function loadInjuries(){
-    // This provider does not expose a clearly documented injuries endpoint in the endpoint set we verified.
-    // Never fabricate injuries. Keep the panel honest until a real injury endpoint is available.
     const card=document.getElementById('injuries');if(!card)return;const title=card.querySelector('.section-title');card.innerHTML='';if(title)card.appendChild(title);empty(card,'Injury data is not available from the verified RapidAPI endpoints yet.');
   }
 

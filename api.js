@@ -11,6 +11,7 @@
 
   const getKey = () => localStorage.getItem(KEY) || '';
   const today = () => new Date().toISOString().slice(0, 10);
+  const datePlus = days => { const d=new Date(); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   function toast(msg) {
@@ -84,11 +85,16 @@
     return `<div class="match-row" data-api-search="${esc((h+' '+a+' '+(m.league?.name||m.leagueName||'')).toLowerCase())}"><div class="match-time">${esc(time)}</div><div class="teams"><div class="team-line"><span>${esc(h)}</span><span>${esc(hs)}</span></div><div class="team-line"><span>${esc(a)}</span><span>${esc(as)}</span></div><div class="league-label">${esc(m.league?.name||m.leagueName||m.tournamentName||'')}</div></div><span>›</span></div>`;
   }
 
-  async function loadMatches(){
-    const data=await api('/football-get-matches-by-date',{date:today()});
+  async function loadMatchesForDate(date,label='matches'){
+    const data=await api('/football-get-matches-by-date',{date});
     const arr=listFrom(data,['response','results','data','events','matches']);const box=document.getElementById('matchList');if(!box)return;
-    box.innerHTML=arr.length?arr.slice(0,100).map(matchRow).join(''):'<div style="padding:28px;text-align:center;color:var(--muted)">No football matches returned for today.</div>';
+    const title=document.querySelector('#matches .section-title h2'); if(title)title.textContent=label;
+    box.innerHTML=arr.length?arr.slice(0,100).map(matchRow).join(''):`<div style="padding:28px;text-align:center;color:var(--muted)">No football matches returned for ${esc(date)}.</div>`;
   }
+
+  async function loadMatches(){ return loadMatchesForDate(today(),'Today Matches'); }
+
+  async function loadTomorrow(){ return loadMatchesForDate(datePlus(1),'Tomorrow'); }
 
   async function loadLive(){
     const data=await api(LIVE_PATH);const arr=listFrom(data,['live','response','results','data','events','matches']);const featured=document.querySelector('.featured');if(!featured)return;
@@ -140,5 +146,22 @@
   function addConnectionBadge(){let e=document.getElementById('scorivoConnected');if(e)return;e=document.createElement('div');e.id='scorivoConnected';Object.assign(e.style,{position:'fixed',left:'18px',bottom:'18px',zIndex:999,font:'10px system-ui',padding:'8px 11px',borderRadius:'10px',background:'var(--surface-solid,#fff)',color:'var(--text,#062525)',border:'1px solid var(--line,#ddd)'});document.body.appendChild(e);updateBadge();}
   function installRefreshButton(){if(document.getElementById('scorivoRefresh'))return;let b=document.createElement('button');b.id='scorivoRefresh';b.textContent='↻ Refresh scores';Object.assign(b.style,{position:'fixed',right:'18px',bottom:'66px',zIndex:998,border:'1px solid var(--line,#ddd)',borderRadius:'999px',padding:'9px 13px',background:'var(--surface-solid,#fff)',color:'var(--text,#062525)',fontWeight:'800',fontSize:'11px'});b.onclick=()=>refresh(true);document.body.appendChild(b);}
 
-  window.addEventListener('load',()=>{clearDemoData();ensureSettings();addConnectionBadge();installRefreshButton();if(getKey())refresh(false);});
+  function scrollToSection(selector){ const el=document.querySelector(selector); if(el){el.scrollIntoView({behavior:'smooth',block:'start'});return true;} return false; }
+
+  function installQuickAccess(){
+    const buttons=[...document.querySelectorAll('.sidebar .side-link')];
+    if(!buttons.length)return;
+    const actions=[
+      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[0].classList.add('active');window.scrollTo({top:0,behavior:'smooth'});if(getKey()){try{await loadLive();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
+      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[1].classList.add('active');scrollToSection('#matches');if(getKey()){try{await loadMatches();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
+      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[2].classList.add('active');scrollToSection('#matches');if(getKey()){try{await loadTomorrow();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
+      ()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[3].classList.add('active');toast('Favorites are ready — select matches to add them here.');},
+      ()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[4].classList.add('active');scrollToSection('.sidebar');toast('Countries: use the live competition list below.');},
+      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[5].classList.add('active');scrollToSection('#leagues');if(getKey()){try{await loadLeagues();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
+      ()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[6].classList.add('active');scrollToSection('.bottom-grid');toast('Tournaments');}
+    ];
+    buttons.slice(0,7).forEach((button,i)=>{button.type='button';button.addEventListener('click',e=>{e.preventDefault();actions[i]?.();});});
+  }
+
+  window.addEventListener('load',()=>{clearDemoData();ensureSettings();addConnectionBadge();installRefreshButton();installQuickAccess();if(getKey())refresh(false);});
 })();

@@ -1,167 +1,100 @@
-/* SCORIVO — RapidAPI Smart API football connector
-   Provider: Free API Live Football Data (Smart API)
-   The RapidAPI key is stored only in this browser and is never committed to GitHub.
-*/
+/* SCORIVO — RapidAPI Smart API football connector */
 (() => {
-  const HOST = 'free-api-live-football-data.p.rapidapi.com';
-  const BASE = `https://${HOST}`;
-  const KEY = 'scorivo_rapidapi_key';
-  const LIVE_PATH = '/football-current-live';
-  const STANDING_PATH = '/football-get-standing-home';
+  const HOST='free-api-live-football-data.p.rapidapi.com';
+  const BASE=`https://${HOST}`;
+  const KEY='scorivo_rapidapi_key';
+  const LIVE='/football-current-live';
+  const STANDING='/football-get-standing-home';
+  const PLAYER_SEARCH='/football-all-players-search';
+  let leaguesCache=[];
 
-  const getKey = () => localStorage.getItem(KEY) || '';
-  const today = () => new Date().toISOString().slice(0, 10);
-  const datePlus = days => { const d=new Date(); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); };
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const getKey=()=>localStorage.getItem(KEY)||'';
+  const today=()=>new Date().toISOString().slice(0,10);
+  const datePlus=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
+  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const text=v=>typeof v==='object'?JSON.stringify(v):String(v??'');
 
-  function toast(msg) {
-    let t = document.getElementById('scorivo-api-toast');
-    if (!t) {
-      t = document.createElement('div'); t.id = 'scorivo-api-toast';
-      Object.assign(t.style,{position:'fixed',bottom:'25px',left:'50%',transform:'translateX(-50%)',zIndex:9999,background:'#062b2a',color:'#fff',padding:'12px 18px',borderRadius:'12px',font:'12px system-ui',boxShadow:'0 15px 40px #0005'});
-      document.body.appendChild(t);
-    }
-    t.textContent = msg; t.style.display='block'; clearTimeout(t._timer); t._timer=setTimeout(()=>t.style.display='none',3500);
+  function toast(msg){
+    let t=document.getElementById('scorivo-api-toast');
+    if(!t){t=document.createElement('div');t.id='scorivo-api-toast';Object.assign(t.style,{position:'fixed',bottom:'25px',left:'50%',transform:'translateX(-50%)',zIndex:99999,background:'#062b2a',color:'#fff',padding:'12px 18px',borderRadius:'12px',font:'12px system-ui',boxShadow:'0 15px 40px #0005',maxWidth:'90vw',textAlign:'center'});document.body.appendChild(t)}
+    t.textContent=msg;t.style.display='block';clearTimeout(t._timer);t._timer=setTimeout(()=>t.style.display='none',4000);
   }
 
-  async function api(path, params = {}) {
-    const key = getKey();
-    if (!key) throw new Error('Connect your RapidAPI key first.');
-    const url = new URL(BASE + path);
-    Object.entries(params).forEach(([k,v]) => { if(v !== undefined && v !== null && v !== '') url.searchParams.set(k,v); });
-    const res = await fetch(url, {headers:{'X-RapidAPI-Key':key,'X-RapidAPI-Host':HOST,'Accept':'application/json'}});
-    const text = await res.text();
-    let data; try { data = JSON.parse(text); } catch { throw new Error(`RapidAPI returned ${res.status} with a non-JSON response.`); }
-    if (!res.ok) throw new Error(data?.message || data?.error || `RapidAPI request failed (${res.status})`);
+  async function api(path,params={}){
+    const key=getKey();if(!key)throw new Error('Connect your RapidAPI key first.');
+    const u=new URL(BASE+path);Object.entries(params).forEach(([k,v])=>{if(v!==undefined&&v!==null&&v!=='')u.searchParams.set(k,v)});
+    const r=await fetch(u,{headers:{'X-RapidAPI-Key':key,'X-RapidAPI-Host':HOST,'Accept':'application/json'}});
+    const raw=await r.text();let data;try{data=JSON.parse(raw)}catch{throw new Error(`RapidAPI returned ${r.status} with a non-JSON response.`)}
+    if(!r.ok)throw new Error(data?.message||data?.error||`RapidAPI request failed (${r.status})`);
     return data;
   }
-
-  function listFrom(data, keys=['response','results','data','suggestions','events','matches','live','leagues','standing']) {
-    if (Array.isArray(data)) return data;
-    for (const k of keys) if (Array.isArray(data?.[k])) return data[k];
-    for (const k of keys) if (Array.isArray(data?.response?.[k])) return data.response[k];
+  function listFrom(d,keys=['response','results','data','suggestions','events','matches','live','leagues','standing']){
+    if(Array.isArray(d))return d;
+    for(const k of keys)if(Array.isArray(d?.[k]))return d[k];
+    for(const k of keys)if(Array.isArray(d?.response?.[k]))return d.response[k];
     return [];
   }
+  function empty(el,msg){if(el)el.innerHTML=`<div style="padding:28px 16px;text-align:center;color:var(--muted);font-size:12px">${esc(msg)}</div>`}
 
-  function empty(el, message) { if(el) el.innerHTML=`<div style="padding:28px 16px;text-align:center;color:var(--muted);font-size:12px">${esc(message)}</div>`; }
-
-  function clearDemoData() {
-    empty(document.getElementById('matchList'), getKey() ? 'Loading real matches…' : 'Connect RapidAPI to load real matches.');
-    const featured=document.querySelector('.featured');
-    if(featured){ const l=featured.querySelector('.live-label'); if(l) l.innerHTML='<i></i> LIVE MATCHES'; const c=featured.querySelector('.match-center'); if(c)c.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:28px 10px;color:#a9c8c5;font-size:13px">No live match loaded yet.</div>'; const w=featured.querySelector('.watch'); if(w)w.style.display='none'; }
-    const injuries=document.getElementById('injuries');
-    if(injuries){ const title=injuries.querySelector('.section-title'); injuries.innerHTML=''; if(title) injuries.appendChild(title); empty(injuries,getKey()?'Loading real injury data…':'Connect RapidAPI to load injury data.'); }
-    document.querySelectorAll('.player-dot').forEach(p=>p.remove());
-    const formation=document.querySelector('.formation'); if(formation) formation.innerHTML='<span>Formation</span><strong>—</strong><span>Waiting for real match data</span>';
-    const player=document.querySelector('.player-card'); if(player){const n=player.querySelector('.player-name'),r=player.querySelector('.player-role'),s=player.querySelector('.player-stats');if(n)n.innerHTML='Top player<br>loading…';if(r)r.textContent='Real player data will appear here';if(s)s.innerHTML='<div class="stat"><strong>—</strong><small>Matches</small></div><div class="stat"><strong>—</strong><small>Goals</small></div><div class="stat"><strong>—</strong><small>Assists</small></div>';}
-    const standings=document.querySelector('.standings');
-    if(standings) standings.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">'+(getKey()?'Loading real standings…':'Connect RapidAPI to load real standings.')+'</div>';
+  function clearDemoData(){
+    empty(document.getElementById('matchList'),getKey()?'Loading real matches…':'Connect RapidAPI to load real matches.');
+    const f=document.querySelector('.featured');if(f){const l=f.querySelector('.live-label'),c=f.querySelector('.match-center'),w=f.querySelector('.watch');if(l)l.innerHTML='<i></i> LIVE MATCHES';if(c)c.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:28px 10px;color:#a9c8c5;font-size:13px">No live match loaded yet.</div>';if(w)w.style.display='none'}
+    const s=document.querySelector('.standings');if(s)s.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">'+(getKey()?'Loading real standings…':'Connect RapidAPI to load real standings.')+'</div>';
+    const p=document.querySelector('.player-card');if(p){const n=p.querySelector('.player-name'),r=p.querySelector('.player-role'),st=p.querySelector('.player-stats');if(n)n.innerHTML='Top player<br>loading…';if(r)r.textContent='Search for a player to see data';if(st)st.innerHTML='<div class="stat"><strong>—</strong><small>Matches</small></div><div class="stat"><strong>—</strong><small>Goals</small></div><div class="stat"><strong>—</strong><small>Assists</small></div>'}
   }
 
   function ensureSettings(){
     if(document.getElementById('scorivoApiBtn'))return;
-    const btn=document.createElement('button');btn.id='scorivoApiBtn';btn.textContent='⚙ API';Object.assign(btn.style,{position:'fixed',right:'18px',bottom:'18px',zIndex:1000,border:'0',borderRadius:'999px',padding:'11px 16px',background:'#20c9bb',color:'#032b29',fontWeight:'900',boxShadow:'0 8px 25px #0003'});document.body.appendChild(btn);
-    const modal=document.createElement('div');modal.id='scorivoApiModal';Object.assign(modal.style,{display:'none',position:'fixed',inset:0,zIndex:999,background:'#0008',alignItems:'center',justifyContent:'center',padding:'20px'});
-    modal.innerHTML=`<div style="width:min(520px,100%);background:var(--surface-solid,#fff);color:var(--text,#062525);border:1px solid var(--line,#ddd);border-radius:20px;padding:22px;box-shadow:0 25px 80px #0006;font-family:system-ui"><div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">SCORIVO API</h2><button id="scClose" style="border:0;background:transparent;font-size:22px">×</button></div><p style="color:var(--muted,#65817f);font-size:13px;line-height:1.5">Connect the free <b>Free API Live Football Data</b> service through RapidAPI. Your key stays only in this browser and is never written to GitHub.</p><input id="scKey" type="password" placeholder="Paste your RapidAPI key" style="width:100%;height:44px;border:1px solid var(--line,#ddd);border-radius:11px;padding:0 12px;background:var(--surface,#fff);color:var(--text,#062525)"><div style="display:flex;gap:8px;margin-top:12px"><button id="scSave" style="border:0;border-radius:10px;padding:10px 15px;background:#20c9bb;font-weight:800">Connect & Load</button><button id="scClear" style="border:1px solid var(--line,#ddd);border-radius:10px;padding:10px 15px;background:transparent;color:inherit">Clear</button></div><div id="scStatus" style="margin-top:12px;color:var(--muted,#65817f);font-size:11px"></div></div>`;
-    document.body.appendChild(modal);
-    const input=modal.querySelector('#scKey'),status=modal.querySelector('#scStatus');input.value=getKey();
-    btn.onclick=()=>{modal.style.display='flex';input.value=getKey();};modal.querySelector('#scClose').onclick=()=>modal.style.display='none';modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
-    modal.querySelector('#scSave').onclick=async()=>{const v=input.value.trim();if(!v){status.textContent='Paste your RapidAPI key first.';return}localStorage.setItem(KEY,v);status.textContent='Saved. Testing RapidAPI…';clearDemoData();try{await api(LIVE_PATH);status.textContent='Connected. Loading real football data…';await refresh(true);modal.style.display='none';toast('SCORIVO is connected to RapidAPI.')}catch(e){status.textContent='Connection failed: '+e.message;clearDemoData();}};
-    modal.querySelector('#scClear').onclick=()=>{localStorage.removeItem(KEY);input.value='';status.textContent='Key cleared. Real data only.';clearDemoData();updateBadge();};
+    const b=document.createElement('button');b.id='scorivoApiBtn';b.textContent='⚙ API';Object.assign(b.style,{position:'fixed',right:'18px',bottom:'18px',zIndex:1000,border:0,borderRadius:'999px',padding:'11px 16px',background:'#20c9bb',color:'#032b29',fontWeight:900,boxShadow:'0 8px 25px #0003'});document.body.appendChild(b);
+    const m=document.createElement('div');m.id='scorivoApiModal';Object.assign(m.style,{display:'none',position:'fixed',inset:0,zIndex:9999,background:'#0008',alignItems:'center',justifyContent:'center',padding:'20px'});
+    m.innerHTML=`<div style="width:min(520px,100%);background:var(--surface-solid,#fff);color:var(--text,#062525);border:1px solid var(--line,#ddd);border-radius:20px;padding:22px;box-shadow:0 25px 80px #0006;font-family:system-ui"><div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">SCORIVO API</h2><button id="scClose" style="border:0;background:transparent;font-size:22px">×</button></div><p style="color:var(--muted,#65817f);font-size:13px;line-height:1.5">Connect the free Free API Live Football Data service through RapidAPI. Your key stays only in this browser.</p><input id="scKey" type="password" placeholder="Paste your RapidAPI key" style="width:100%;height:44px;border:1px solid var(--line,#ddd);border-radius:11px;padding:0 12px;background:var(--surface,#fff);color:var(--text,#062525)"><div style="display:flex;gap:8px;margin-top:12px"><button id="scSave" style="border:0;border-radius:10px;padding:10px 15px;background:#20c9bb;font-weight:800">Connect & Load</button><button id="scClear" style="border:1px solid var(--line,#ddd);border-radius:10px;padding:10px 15px;background:transparent;color:inherit">Clear</button></div><div id="scStatus" style="margin-top:12px;color:var(--muted,#65817f);font-size:11px"></div></div>`;
+    document.body.appendChild(m);const input=m.querySelector('#scKey'),status=m.querySelector('#scStatus');input.value=getKey();
+    b.onclick=()=>{m.style.display='flex';input.value=getKey()};m.querySelector('#scClose').onclick=()=>m.style.display='none';m.addEventListener('click',e=>{if(e.target===m)m.style.display='none'});
+    m.querySelector('#scSave').onclick=async()=>{const v=input.value.trim();if(!v){status.textContent='Paste your RapidAPI key first.';return}localStorage.setItem(KEY,v);status.textContent='Testing RapidAPI…';clearDemoData();try{await api(LIVE);status.textContent='Connected. Loading real football data…';await refresh(true);m.style.display='none';toast('SCORIVO connected to RapidAPI.')}catch(e){status.textContent='Connection failed: '+e.message;clearDemoData()}};
+    m.querySelector('#scClear').onclick=()=>{localStorage.removeItem(KEY);input.value='';status.textContent='Key cleared.';clearDemoData();updateBadge()};
   }
 
-  function normaliseMatch(x){
-    const home=x?.homeTeam||x?.home_team||x?.home||x?.teams?.home||x?.teamHome||x?.participants?.find?.(p=>p?.meta?.location==='home')||{};
-    const away=x?.awayTeam||x?.away_team||x?.away||x?.teams?.away||x?.teamAway||x?.participants?.find?.(p=>p?.meta?.location==='away')||{};
-    const score=x?.score||x?.scores||x?.result||{};
-    return {home,away,score,league:x?.league||x?.tournament||x?.competition||{},date:x?.startTime||x?.start_time||x?.start_date||x?.date||x?.startTimestamp,status:x?.status||x?.eventStatus||x?.matchStatus||''};
-  }
   const teamName=t=>t?.name||t?.teamName||t?.team_name||t?.shortName||'Unknown';
-  const scoreValue=(s,side)=>s?.[side] ?? s?.[side+'_score'] ?? s?.goals?.[side] ?? s?.current?.[side] ?? s?.display?.[side] ?? '-';
+  const scoreValue=(s,side)=>s?.[side]??s?.[side+'_score']??s?.goals?.[side]??s?.current?.[side]??s?.display?.[side]??'-';
+  function normaliseMatch(x){return{home:x?.homeTeam||x?.home_team||x?.home||x?.teams?.home||{},away:x?.awayTeam||x?.away_team||x?.away||x?.teams?.away||{},score:x?.score||x?.scores||x?.result||{},league:x?.league||x?.tournament||x?.competition||{},date:x?.startTime||x?.start_time||x?.start_date||x?.date,status:x?.status||x?.eventStatus||x?.matchStatus||''}}
+  function matchRow(raw){const m=normaliseMatch(raw),h=teamName(m.home),a=teamName(m.away),d=m.date?new Date(m.date):null;const tm=m.status?.short||m.status?.name||m.status||((d&&!isNaN(d))?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—');return`<div class="match-row"><div class="match-time">${esc(tm)}</div><div class="teams"><div class="team-line"><span>${esc(h)}</span><span>${esc(scoreValue(m.score,'home'))}</span></div><div class="team-line"><span>${esc(a)}</span><span>${esc(scoreValue(m.score,'away'))}</span></div><div class="league-label">${esc(m.league?.name||m.leagueName||m.tournamentName||'')}</div></div><span>›</span></div>`}
 
-  function matchRow(raw){
-    const m=normaliseMatch(raw),h=teamName(m.home),a=teamName(m.away),hs=scoreValue(m.score,'home'),as=scoreValue(m.score,'away');
-    const d=m.date?new Date(m.date):null;const time=m.status?.short||m.status?.name||m.status||((d&&!isNaN(d))?d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'—');
-    return `<div class="match-row" data-api-search="${esc((h+' '+a+' '+(m.league?.name||m.leagueName||'')).toLowerCase())}"><div class="match-time">${esc(time)}</div><div class="teams"><div class="team-line"><span>${esc(h)}</span><span>${esc(hs)}</span></div><div class="team-line"><span>${esc(a)}</span><span>${esc(as)}</span></div><div class="league-label">${esc(m.league?.name||m.leagueName||m.tournamentName||'')}</div></div><span>›</span></div>`;
+  async function loadLive(){const d=await api(LIVE),a=listFrom(d,['live','response','results','data','events','matches']),f=document.querySelector('.featured');if(!f)return;const l=f.querySelector('.live-label'),c=f.querySelector('.match-center'),w=f.querySelector('.watch');if(!a.length){if(l)l.innerHTML='<i></i> NO LIVE MATCHES';if(c)c.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:28px 10px;color:#a9c8c5;font-size:13px">There are no live football matches right now.</div>';if(w)w.style.display='none';return}const m=normaliseMatch(a[0]);if(l)l.innerHTML='<i></i> LIVE NOW · '+a.length;if(c)c.innerHTML=`<div><div class="club-badge">⚽</div><div class="club-name">${esc(teamName(m.home))}</div></div><div><div class="score">${esc(scoreValue(m.score,'home'))} : ${esc(scoreValue(m.score,'away'))}</div><div class="minute">LIVE</div></div><div><div class="club-badge">⚽</div><div class="club-name">${esc(teamName(m.away))}</div></div>`;if(w)w.style.display='inline-block'}
+
+  async function loadMatchesForDate(date,label){const d=await api('/football-get-matches-by-date',{date}),a=listFrom(d,['response','results','data','events','matches']),box=document.getElementById('matchList');if(!box)return;const h=document.querySelector('#matches .section-title h2');if(h)h.textContent=label;box.innerHTML=a.length?a.slice(0,100).map(matchRow).join(''):`<div style="padding:28px;text-align:center;color:var(--muted)">No football matches returned for ${esc(date)}.</div>`}
+  const loadMatches=()=>loadMatchesForDate(today(),'Today Matches');
+  const loadTomorrow=()=>loadMatchesForDate(datePlus(1),'Tomorrow');
+
+  function leagueId(x){return x?.id??x?.leagueid??x?.leagueId??x?.league?.id??x?.league_id}
+  function leagueName(x){return x?.name||x?.league_name||x?.leagueName||x?.league?.name||''}
+  async function loadLeagues(){const d=await api('/football-get-all-leagues'),a=listFrom(d,['response','results','data','leagues']);leaguesCache=a;const side=document.querySelector('.sidebar');if(!side)return;let old=document.getElementById('scorivoLiveLeagues');if(old)old.remove();const wrap=document.createElement('div');wrap.id='scorivoLiveLeagues';wrap.innerHTML='<div class="side-divider"></div><h4>More Leagues</h4>'+a.slice(0,30).map(x=>`<button class="side-link scorivo-api-league" data-league-id="${esc(leagueId(x))}" data-league-name="${esc(leagueName(x))}">🏆 ${esc(leagueName(x)||'Competition')}</button>`).join('');side.appendChild(wrap);wrap.querySelectorAll('.scorivo-api-league').forEach(b=>b.addEventListener('click',()=>openLeague(b.dataset.leagueId,b.dataset.leagueName)))}
+
+  async function openLeague(id,name){if(!id){const found=leaguesCache.find(x=>leagueName(x).toLowerCase()===String(name).toLowerCase());id=leagueId(found)}if(!id){toast('SCORIVO could not find the league ID from the API.');return}document.querySelectorAll('.sidebar .side-link').forEach(x=>x.classList.remove('active'));scrollToSection('#leagues');const box=document.querySelector('.standings');if(!box)return;const title=document.querySelector('#leagues .section-title h2'),season=document.querySelector('#leagues .section-title span');if(title)title.textContent=name||'League';if(season)season.textContent='Live standings';box.innerHTML='<div style="padding:28px;text-align:center;color:var(--muted)">Loading '+esc(name)+' standings…</div>';try{const d=await api(STANDING,{leagueid:id});const rows=listFrom(d,['standing','standings','response','results','data']);if(!rows.length){box.innerHTML='<div style="padding:28px;text-align:center;color:var(--muted)">No standings returned for '+esc(name)+'.</div>';return}const num=(...v)=>{for(const x of v)if(x!==undefined&&x!==null&&x!=='')return x;return'—'};const team=r=>r?.team_name||r?.teamName||r?.team?.name||r?.name||'Unknown';box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div>'+rows.slice(0,30).map((r,i)=>{const gd=num(r.goal_difference,r.goal_diff,r.goals_diff);return`<div class="stand-row"><b>${esc(num(r.place,r.position,i+1))}</b><span>${esc(team(r))}</span><span>${esc(num(r.played,r.matches_played,r.games_played))}</span><span>${esc(gd)}</span><b>${esc(num(r.points,r.pts))}</b></div>`}).join('')}catch(e){box.innerHTML='<div style="padding:28px;text-align:center;color:var(--muted)">Could not load '+esc(name)+' standings: '+esc(e.message)+'</div>'}}
+
+  async function loadStandings(){return openLeague('47','Premier League')}
+  async function loadInjuries(){const c=document.getElementById('injuries');if(c){const t=c.querySelector('.section-title');c.innerHTML='';if(t)c.appendChild(t);empty(c,'Injury data is not available from the verified RapidAPI endpoints yet.')}}
+
+  function searchModal(){
+    if(document.getElementById('scorivoSearchModal'))return;
+    const m=document.createElement('div');m.id='scorivoSearchModal';Object.assign(m.style,{display:'none',position:'fixed',inset:0,zIndex:9998,background:'#0009',alignItems:'center',justifyContent:'center',padding:'18px'});
+    m.innerHTML=`<div style="width:min(760px,100%);max-height:90vh;overflow:auto;background:var(--surface-solid,#fff);color:var(--text,#062525);border-radius:20px;padding:20px;box-shadow:0 25px 80px #0007"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><h2 id="scSearchTitle" style="margin:0">Player search</h2><button id="scSearchClose" style="border:0;background:transparent;font-size:24px">×</button></div><div id="scSearchBody" style="margin-top:15px"></div></div>`;document.body.appendChild(m);m.querySelector('#scSearchClose').onclick=()=>m.style.display='none';m.addEventListener('click',e=>{if(e.target===m)m.style.display='none'});
   }
+  function playerImage(p){return p?.image||p?.photo||p?.photoUrl||p?.playerImage||p?.player_image||p?.avatar||p?.image_url||p?.profileImage||''}
+  function playerName(p){return p?.name||p?.playerName||p?.player_name||'Unknown player'}
+  function playerCard(p){const img=playerImage(p),name=playerName(p),entries=Object.entries(p||{}).filter(([k,v])=>!['image','photo','photoUrl','playerImage','player_image','avatar','image_url','profileImage','name','playerName','player_name'].includes(k)&&typeof v!=='object');return`<div style="display:grid;grid-template-columns:120px 1fr;gap:18px;align-items:start;padding:15px;border:1px solid var(--line);border-radius:16px;background:var(--surface-2)"><div>${img?`<img src="${esc(img)}" alt="${esc(name)}" style="width:110px;height:130px;object-fit:cover;border-radius:14px;background:#0b3836">`:'<div style="width:110px;height:130px;border-radius:14px;background:linear-gradient(145deg,#b7e8e1,#087c73);display:grid;place-items:center;font-size:42px">⚽</div>'}</div><div><h3 style="margin:0 0 4px;font-size:22px">${esc(name)}</h3><div style="color:var(--muted);font-size:12px;margin-bottom:12px">${esc(p?.teamName||p?.team_name||'Team not supplied')} · ID ${esc(p?.id||'—')}</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:7px">${entries.map(([k,v])=>`<div style="padding:8px;border:1px solid var(--line);border-radius:10px"><div style="font-size:9px;color:var(--muted);text-transform:uppercase">${esc(k)}</div><strong style="font-size:12px">${esc(text(v))}</strong></div>`).join('')}</div></div></div>`}
+  async function searchPlayers(q){q=q.trim();if(q.length<2){toast('Type at least 2 letters to search.');return}searchModal();const m=document.getElementById('scorivoSearchModal'),body=m.querySelector('#scSearchBody'),title=m.querySelector('#scSearchTitle');m.style.display='flex';title.textContent='Searching: '+q;body.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Searching real player data…</div>';try{const d=await api(PLAYER_SEARCH,{search:q}),a=listFrom(d,['suggestions','response','results','data','players']);if(!a.length){body.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">No players found.</div>';return}body.innerHTML='<div style="display:grid;gap:10px">'+a.slice(0,20).map((p,i)=>`<button class="sc-player-result" data-index="${i}" style="text-align:left;border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);color:inherit;cursor:pointer"><b>${esc(playerName(p))}</b><span style="display:block;color:var(--muted);font-size:11px">${esc(p?.teamName||p?.team_name||'Team not supplied')} · player ID ${esc(p?.id||'—')}</span></button>`).join('')+'</div>';m._players=a;m.querySelectorAll('.sc-player-result').forEach(b=>b.onclick=()=>{const p=m._players[Number(b.dataset.index)];body.innerHTML=playerCard(p);title.textContent=playerName(p)})}catch(e){body.innerHTML='<div style="padding:30px;text-align:center;color:var(--muted)">Player search failed: '+esc(e.message)+'</div>'}}
 
-  async function loadMatchesForDate(date,label='matches'){
-    const data=await api('/football-get-matches-by-date',{date});
-    const arr=listFrom(data,['response','results','data','events','matches']);const box=document.getElementById('matchList');if(!box)return;
-    const title=document.querySelector('#matches .section-title h2'); if(title)title.textContent=label;
-    box.innerHTML=arr.length?arr.slice(0,100).map(matchRow).join(''):`<div style="padding:28px;text-align:center;color:var(--muted)">No football matches returned for ${esc(date)}.</div>`;
-  }
+  function installSearch(){const inputs=[document.getElementById('topSearch'),document.querySelector('.big-search input')].filter(Boolean);inputs.forEach(i=>{i.addEventListener('keydown',e=>{if(e.key==='Enter')searchPlayers(i.value)});i.addEventListener('change',()=>{if(i.value.trim().length>=2)searchPlayers(i.value)})})}
+  function scrollToSection(s){const e=document.querySelector(s);if(e)e.scrollIntoView({behavior:'smooth',block:'start'})}
 
-  async function loadMatches(){ return loadMatchesForDate(today(),'Today Matches'); }
+  function installQuickAccess(){const b=[...document.querySelectorAll('.sidebar .side-link')];const acts=[()=>{scrollToSection('#matches');getKey()?loadLive().catch(e=>toast(e.message)):toast('Connect RapidAPI first.')},()=>{scrollToSection('#matches');getKey()?loadMatches().catch(e=>toast(e.message)):toast('Connect RapidAPI first.')},()=>{scrollToSection('#matches');getKey()?loadTomorrow().catch(e=>toast(e.message)):toast('Connect RapidAPI first.')},()=>toast('Favorites are not connected yet.'),()=>toast('Countries will use the live league list.'),()=>{scrollToSection('#leagues');getKey()?loadLeagues().catch(e=>toast(e.message)):toast('Connect RapidAPI first.')},()=>scrollToSection('.bottom-grid')];b.slice(0,7).forEach((x,i)=>{x.type='button';x.onclick=e=>{e.preventDefault();acts[i]()}})}
 
-  async function loadTomorrow(){ return loadMatchesForDate(datePlus(1),'Tomorrow'); }
+  function installTopLeagues(){const b=[...document.querySelectorAll('.sidebar .side-link')].slice(7,13);const names=['Premier League','La Liga','Bundesliga','Serie A','Ligue 1','Champions League'];b.forEach((x,i)=>{x.type='button';x.onclick=e=>{e.preventDefault();if(!getKey()){toast('Connect RapidAPI first.');return}const found=leaguesCache.find(l=>leagueName(l).toLowerCase().includes(names[i].toLowerCase()));if(found)openLeague(leagueId(found),leagueName(found));else{api('/football-get-all-leagues').then(d=>{leaguesCache=listFrom(d,['response','results','data','leagues']);const f=leaguesCache.find(l=>leagueName(l).toLowerCase().includes(names[i].toLowerCase()));return f?openLeague(leagueId(f),leagueName(f)):Promise.reject(new Error(names[i]+' was not found in the API league list.'))}).catch(e=>toast(e.message))}})}
 
-  async function loadLive(){
-    const data=await api(LIVE_PATH);const arr=listFrom(data,['live','response','results','data','events','matches']);const featured=document.querySelector('.featured');if(!featured)return;
-    const label=featured.querySelector('.live-label'),old=featured.querySelector('.match-center'),watch=featured.querySelector('.watch');
-    if(!arr.length){if(label)label.innerHTML='<i></i> NO LIVE MATCHES';if(old)old.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:28px 10px;color:#a9c8c5;font-size:13px">There are no live football matches right now.</div>';if(watch)watch.style.display='none';return;}
-    const m=normaliseMatch(arr[0]),h=teamName(m.home),a=teamName(m.away),hs=scoreValue(m.score,'home'),as=scoreValue(m.score,'away');
-    if(label)label.innerHTML='<i></i> LIVE NOW · '+arr.length;if(old)old.innerHTML=`<div><div class="club-badge">⚽</div><div class="club-name">${esc(h)}</div></div><div><div class="score">${esc(hs)} : ${esc(as)}</div><div class="minute">LIVE</div></div><div><div class="club-badge">⚽</div><div class="club-name">${esc(a)}</div></div>`;if(watch)watch.style.display='inline-block';
-  }
+  async function refresh(manual=false){if(!getKey())return;const results=await Promise.allSettled([loadLive(),loadMatches(),loadLeagues(),loadStandings(),loadInjuries()]);if(results.every(r=>r.status==='rejected')){updateBadge('⚠ RapidAPI error');toast(results[0].reason?.message||'RapidAPI error')}else{updateBadge('● RapidAPI connected · updated '+new Date().toLocaleTimeString());if(manual)toast('Real football data updated.')}}
+  function updateBadge(t){const e=document.getElementById('scorivoConnected');if(e)e.textContent=t||(getKey()?'● RapidAPI key saved':'○ API not connected')}
+  function addBadge(){if(document.getElementById('scorivoConnected'))return;const e=document.createElement('div');e.id='scorivoConnected';Object.assign(e.style,{position:'fixed',left:'18px',bottom:'18px',zIndex:999,font:'10px system-ui',padding:'8px 11px',borderRadius:'10px',background:'var(--surface-solid,#fff)',color:'var(--text,#062525)',border:'1px solid var(--line,#ddd)'});document.body.appendChild(e);updateBadge()}
+  function refreshButton(){if(document.getElementById('scorivoRefresh'))return;const b=document.createElement('button');b.id='scorivoRefresh';b.textContent='↻ Refresh scores';Object.assign(b.style,{position:'fixed',right:'18px',bottom:'66px',zIndex:998,border:'1px solid var(--line,#ddd)',borderRadius:'999px',padding:'9px 13px',background:'var(--surface-solid,#fff)',color:'var(--text,#062525)',fontWeight:800,fontSize:'11px'});b.onclick=()=>refresh(true);document.body.appendChild(b)}
 
-  async function loadLeagues(){
-    const data=await api('/football-get-all-leagues');const arr=listFrom(data,['response','results','data','leagues']);let side=document.querySelector('.sidebar');if(side){let old=document.getElementById('scorivoLiveLeagues');if(old)old.remove();let h=document.createElement('div');h.id='scorivoLiveLeagues';h.innerHTML='<div class="side-divider"></div><h4>Competitions</h4>'+arr.slice(0,20).map(x=>`<div class="side-link">🏆 ${esc(x.name||x.league_name||x.league?.name||'Competition')}</div>`).join('');side.appendChild(h);}
-  }
-
-  async function loadStandings(){
-    const box=document.querySelector('.standings');
-    if(!box)return;
-    box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Loading real standings…</div>';
-    try{
-      const data=await api(STANDING_PATH,{leagueid:'47'});
-      const rows=listFrom(data,['standing','standings','response','results','data']);
-      if(!rows.length){box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No standings returned for this league.</div>';return;}
-      const getTeam=r=>r?.team_name||r?.teamName||r?.team?.name||r?.name||'Unknown team';
-      const num=(...vals)=>{for(const v of vals){if(v!==undefined&&v!==null&&v!=='')return v;}return '—';};
-      const teamIcon=r=>r?.team_logo||r?.team?.logo||'';
-      box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div>'+rows.slice(0,30).map((r,i)=>{
-        const pos=num(r.place,r.position,i+1), played=num(r.played,r.matches_played,r.games_played), gd=num(r.goal_difference,r.goal_diff,r.goals_diff,((Number(r.goals_for)||0)-(Number(r.goals_against)||0))), pts=num(r.points,r.pts);
-        const logo=teamIcon(r); const name=getTeam(r); const team=logo?`<img src="${esc(logo)}" alt="" style="width:18px;height:18px;object-fit:contain;vertical-align:middle;margin-right:6px">${esc(name)}`:`${esc(name)}`;
-        return `<div class="stand-row"><b>${esc(pos)}</b><span>${team}</span><span>${esc(played)}</span><span>${esc(gd>0?'+'+gd:gd)}</span><b>${esc(pts)}</b></div>`;
-      }).join('');
-      const title=document.querySelector('#leagues .section-title h2'); if(title)title.textContent='Premier League';
-      const season=document.querySelector('#leagues .section-title span'); if(season)season.textContent='Live standings';
-    }catch(e){
-      console.warn('SCORIVO standings:',e);
-      box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Standings could not be loaded. No demo data is shown.</div>';
-    }
-  }
-
-  async function loadInjuries(){
-    const card=document.getElementById('injuries');if(!card)return;const title=card.querySelector('.section-title');card.innerHTML='';if(title)card.appendChild(title);empty(card,'Injury data is not available from the verified RapidAPI endpoints yet.');
-  }
-
-  async function refresh(manual=false){
-    if(!getKey())return;
-    try{await Promise.allSettled([loadLive(),loadMatches(),loadLeagues(),loadStandings(),loadInjuries()]);updateBadge('● RapidAPI connected · updated '+new Date().toLocaleTimeString());if(manual)toast('Real football data updated.');}
-    catch(e){updateBadge('⚠ RapidAPI error');toast(e.message);console.error(e);}
-  }
-
-  function updateBadge(text){let e=document.getElementById('scorivoConnected');if(!e)return;e.textContent=text||(getKey()?'● RapidAPI key saved':'○ API not connected');}
-  function addConnectionBadge(){let e=document.getElementById('scorivoConnected');if(e)return;e=document.createElement('div');e.id='scorivoConnected';Object.assign(e.style,{position:'fixed',left:'18px',bottom:'18px',zIndex:999,font:'10px system-ui',padding:'8px 11px',borderRadius:'10px',background:'var(--surface-solid,#fff)',color:'var(--text,#062525)',border:'1px solid var(--line,#ddd)'});document.body.appendChild(e);updateBadge();}
-  function installRefreshButton(){if(document.getElementById('scorivoRefresh'))return;let b=document.createElement('button');b.id='scorivoRefresh';b.textContent='↻ Refresh scores';Object.assign(b.style,{position:'fixed',right:'18px',bottom:'66px',zIndex:998,border:'1px solid var(--line,#ddd)',borderRadius:'999px',padding:'9px 13px',background:'var(--surface-solid,#fff)',color:'var(--text,#062525)',fontWeight:'800',fontSize:'11px'});b.onclick=()=>refresh(true);document.body.appendChild(b);}
-
-  function scrollToSection(selector){ const el=document.querySelector(selector); if(el){el.scrollIntoView({behavior:'smooth',block:'start'});return true;} return false; }
-
-  function installQuickAccess(){
-    const buttons=[...document.querySelectorAll('.sidebar .side-link')];
-    if(!buttons.length)return;
-    const actions=[
-      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[0].classList.add('active');window.scrollTo({top:0,behavior:'smooth'});if(getKey()){try{await loadLive();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
-      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[1].classList.add('active');scrollToSection('#matches');if(getKey()){try{await loadMatches();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
-      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[2].classList.add('active');scrollToSection('#matches');if(getKey()){try{await loadTomorrow();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
-      ()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[3].classList.add('active');toast('Favorites are ready — select matches to add them here.');},
-      ()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[4].classList.add('active');scrollToSection('.sidebar');toast('Countries: use the live competition list below.');},
-      async()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[5].classList.add('active');scrollToSection('#leagues');if(getKey()){try{await loadLeagues();}catch(e){toast(e.message);}}else toast('Connect RapidAPI first.');},
-      ()=>{buttons.forEach(b=>b.classList.remove('active'));buttons[6].classList.add('active');scrollToSection('.bottom-grid');toast('Tournaments');}
-    ];
-    buttons.slice(0,7).forEach((button,i)=>{button.type='button';button.addEventListener('click',e=>{e.preventDefault();actions[i]?.();});});
-  }
-
-  window.addEventListener('load',()=>{clearDemoData();ensureSettings();addConnectionBadge();installRefreshButton();installQuickAccess();if(getKey())refresh(false);});
+  window.addEventListener('load',()=>{clearDemoData();ensureSettings();addBadge();refreshButton();installQuickAccess();installTopLeagues();installSearch();if(getKey())refresh(false)});
 })();

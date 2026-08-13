@@ -7,6 +7,7 @@
   const BASE = `https://${HOST}`;
   const KEY = 'scorivo_rapidapi_key';
   const LIVE_PATH = '/football-current-live';
+  const STANDING_PATH = '/football-get-standing-home';
 
   const getKey = () => localStorage.getItem(KEY) || '';
   const today = () => new Date().toISOString().slice(0, 10);
@@ -52,6 +53,8 @@
     document.querySelectorAll('.player-dot').forEach(p=>p.remove());
     const formation=document.querySelector('.formation'); if(formation) formation.innerHTML='<span>Formation</span><strong>—</strong><span>Waiting for real match data</span>';
     const player=document.querySelector('.player-card'); if(player){const n=player.querySelector('.player-name'),r=player.querySelector('.player-role'),s=player.querySelector('.player-stats');if(n)n.innerHTML='Top player<br>loading…';if(r)r.textContent='Real player data will appear here';if(s)s.innerHTML='<div class="stat"><strong>—</strong><small>Matches</small></div><div class="stat"><strong>—</strong><small>Goals</small></div><div class="stat"><strong>—</strong><small>Assists</small></div>';}
+    const standings=document.querySelector('.standings');
+    if(standings) standings.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">'+(getKey()?'Loading real standings…':'Connect RapidAPI to load real standings.')+'</div>';
   }
 
   function ensureSettings(){
@@ -99,13 +102,37 @@
     const data=await api('/football-get-all-leagues');const arr=listFrom(data,['response','results','data','leagues']);let side=document.querySelector('.sidebar');if(side){let old=document.getElementById('scorivoLiveLeagues');if(old)old.remove();let h=document.createElement('div');h.id='scorivoLiveLeagues';h.innerHTML='<div class="side-divider"></div><h4>Competitions</h4>'+arr.slice(0,20).map(x=>`<div class="side-link">🏆 ${esc(x.name||x.league_name||x.league?.name||'Competition')}</div>`).join('');side.appendChild(h);}
   }
 
+  async function loadStandings(){
+    const box=document.querySelector('.standings');
+    if(!box)return;
+    box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Loading real standings…</div>';
+    try{
+      const data=await api(STANDING_PATH,{leagueid:'47'});
+      const rows=listFrom(data,['standing','standings','response','results','data']);
+      if(!rows.length){box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No standings returned for this league.</div>';return;}
+      const getTeam=r=>r?.team_name||r?.teamName||r?.team?.name||r?.name||'Unknown team';
+      const num=(...vals)=>{for(const v of vals){if(v!==undefined&&v!==null&&v!=='')return v;}return '—';};
+      const teamIcon=r=>r?.team_logo||r?.team?.logo||'';
+      box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div>'+rows.slice(0,30).map((r,i)=>{
+        const pos=num(r.place,r.position,i+1), played=num(r.played,r.matches_played,r.games_played), gd=num(r.goal_difference,r.goal_diff,r.goals_diff,((Number(r.goals_for)||0)-(Number(r.goals_against)||0))), pts=num(r.points,r.pts);
+        const logo=teamIcon(r); const name=getTeam(r); const team=logo?`<img src="${esc(logo)}" alt="" style="width:18px;height:18px;object-fit:contain;vertical-align:middle;margin-right:6px">${esc(name)}`:`${esc(name)}`;
+        return `<div class="stand-row"><b>${esc(pos)}</b><span>${team}</span><span>${esc(played)}</span><span>${esc(gd>0?'+'+gd:gd)}</span><b>${esc(pts)}</b></div>`;
+      }).join('');
+      const title=document.querySelector('#leagues .section-title h2'); if(title)title.textContent='Premier League';
+      const season=document.querySelector('#leagues .section-title span'); if(season)season.textContent='Live standings';
+    }catch(e){
+      console.warn('SCORIVO standings:',e);
+      box.innerHTML='<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Standings could not be loaded. No demo data is shown.</div>';
+    }
+  }
+
   async function loadInjuries(){
     const card=document.getElementById('injuries');if(!card)return;const title=card.querySelector('.section-title');card.innerHTML='';if(title)card.appendChild(title);empty(card,'Injury data is not available from the verified RapidAPI endpoints yet.');
   }
 
   async function refresh(manual=false){
     if(!getKey())return;
-    try{await Promise.allSettled([loadLive(),loadMatches(),loadLeagues(),loadInjuries()]);updateBadge('● RapidAPI connected · updated '+new Date().toLocaleTimeString());if(manual)toast('Real football data updated.');}
+    try{await Promise.allSettled([loadLive(),loadMatches(),loadLeagues(),loadStandings(),loadInjuries()]);updateBadge('● RapidAPI connected · updated '+new Date().toLocaleTimeString());if(manual)toast('Real football data updated.');}
     catch(e){updateBadge('⚠ RapidAPI error');toast(e.message);console.error(e);}
   }
 

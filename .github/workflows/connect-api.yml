@@ -1,0 +1,39 @@
+name: Connect SCORIVO API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api.js'
+      - '.github/workflows/connect-api.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  inject-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inject API connector into index.html
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('index.html')
+          text = p.read_text(encoding='utf-8')
+          tag = '<script src="api.js"></script>'
+          if tag not in text:
+              marker = '</body>'
+              if marker not in text:
+                  raise SystemExit('index.html does not contain </body>')
+              text = text.replace(marker, tag + '\n' + marker, 1)
+              p.write_text(text, encoding='utf-8')
+
+      - name: Commit injected connector
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Connect SCORIVO to API-Football [skip ci]"
+          git push

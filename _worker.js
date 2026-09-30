@@ -1,20 +1,10 @@
-const API_BASE = "https://v3.football.api-sports.io/";
-const ALLOWED_ENDPOINTS = new Set([
-  "fixtures",
-  "leagues",
-  "teams",
-  "standings",
-  "countries",
-  "injuries",
-  "fixtures/events",
-  "fixtures/lineups",
-  "fixtures/players"
-]);
+const API_BASE = "https://free-api-live-football-data.p.rapidapi.com/";
+const API_HOST = "free-api-live-football-data.p.rapidapi.com";
 
-const ALLOWED_PARAMS = new Set([
-  "id", "ids", "live", "date", "league", "season", "team", "player",
-  "fixture", "from", "to", "next", "last", "status", "timezone",
-  "country", "name", "code", "venue", "search", "type"
+const ALLOWED_ENDPOINTS = new Set([
+  "football-current-live",
+  "football-get-standing-all",
+  "get-search-all-players"
 ]);
 
 function json(data, status = 200, extra = {}) {
@@ -24,18 +14,23 @@ function json(data, status = 200, extra = {}) {
       "content-type": "application/json; charset=UTF-8",
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, OPTIONS",
+      "access-control-allow-headers": "Content-Type",
       ...extra
     }
   });
 }
 
-async function footballApi(request, env) {
+async function rapidApi(request, env) {
   const url = new URL(request.url);
-  const endpoint = url.searchParams.get("endpoint") || "fixtures";
-  const key = env.API_FOOTBALL_KEY;
+  const endpoint = url.searchParams.get("endpoint") || "football-current-live";
+  const key = env.RAPIDAPI_KEY;
 
   if (!key) {
-    return json({ ok: false, error: "API_FOOTBALL_KEY is not configured on the server." }, 500);
+    return json({
+      ok: false,
+      error: "RAPIDAPI_KEY is not configured on the server."
+    }, 500);
   }
 
   if (!ALLOWED_ENDPOINTS.has(endpoint)) {
@@ -45,41 +40,41 @@ async function footballApi(request, env) {
   const target = new URL(endpoint, API_BASE);
   for (const [name, value] of url.searchParams) {
     if (name === "endpoint") continue;
-    if (!ALLOWED_PARAMS.has(name)) {
-      return json({ ok: false, error: `Parameter '${name}' is not allowed.` }, 400);
-    }
     if (value.length > 120) {
       return json({ ok: false, error: "Parameter is too long." }, 400);
     }
     target.searchParams.set(name, value);
   }
 
-  // Cache briefly at Cloudflare's edge so repeated visitors do not consume
-  // an API-Football request for every page load.
   const cache = caches.default;
   const cacheKey = new Request(target.toString(), { method: "GET" });
   const cached = await cache.match(cacheKey);
   if (cached) return new Response(cached.body, cached);
 
-  const upstream = await fetch(target.toString(), {
-    headers: {
-      "x-apisports-key": key,
-      "accept": "application/json"
-    }
-  });
+  let upstream;
+  try {
+    upstream = await fetch(target.toString(), {
+      headers: {
+        "x-rapidapi-key": key,
+        "x-rapidapi-host": API_HOST,
+        "accept": "application/json"
+      }
+    });
+  } catch (error) {
+    return json({ ok: false, error: "Could not connect to RapidAPI." }, 502);
+  }
 
-  const text = await upstream.text();
+  const body = await upstream.text();
   const headers = {
     "content-type": upstream.headers.get("content-type") || "application/json; charset=UTF-8",
-    "cache-control": endpoint === "fixtures" && url.searchParams.get("live") === "all"
+    "cache-control": endpoint === "football-current-live"
       ? "public, max-age=20, s-maxage=20"
       : "public, max-age=120, s-maxage=120",
     "access-control-allow-origin": "*"
   };
 
-  const response = new Response(text, { status: upstream.status, headers });
+  const response = new Response(body, { status: upstream.status, headers });
   if (upstream.ok) {
-    // waitUntil is not available from every Pages context, so cache directly.
     try { await cache.put(cacheKey, response.clone()); } catch (_) {}
   }
   return response;
@@ -89,19 +84,26 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (request.method === "OPTIONS") {
+      return json({ ok: true }, 204);
+    }
+
     if (url.pathname === "/api/football" || url.pathname === "/api/football/") {
       if (request.method !== "GET") return json({ ok: false, error: "GET only" }, 405);
-      return footballApi(request, env);
+      return rapidApi(request, env);
     }
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, service: "SCORIVO football proxy", keyConfigured: Boolean(env.API_FOOTBALL_KEY) });
+      return json({
+        ok: true,
+        service: "SCORIVO RapidAPI football proxy",
+        keyConfigured: Boolean(env.RAPIDAPI_KEY)
+      });
     }
 
     const response = await env.ASSETS.fetch(request);
     const contentType = response.headers.get("content-type") || "";
 
-    // Inject the live-data client without changing the existing SCORIVO design.
     if (contentType.includes("text/html")) {
       return new HTMLRewriter()
         .on("body", {

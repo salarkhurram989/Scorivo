@@ -2,6 +2,7 @@
   "use strict";
 
   const API = "/api/football";
+  const BACKEND_TIMEOUT = 7000;
   const TZ = "Asia/Karachi";
   let liveFixtures = [];
   let todayFixtures = [];
@@ -17,7 +18,14 @@
 
   async function api(endpoint, params = {}) {
     const qs = new URLSearchParams({ endpoint, ...params });
-    const response = await fetch(`${API}?${qs.toString()}`, { headers: { accept: "application/json" } });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BACKEND_TIMEOUT);
+    let response;
+    try {
+      response = await fetch(`${API}?${qs.toString()}`, { headers: { accept: "application/json" }, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.errors && Object.keys(data.errors).length) {
       throw new Error(data.message || data.error || JSON.stringify(data.errors || "API request failed"));
@@ -105,7 +113,7 @@
       setStatus(`LIVE DATA · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
     } catch (error) {
       console.warn("SCORIVO football API:", error);
-      setStatus("API NOT CONNECTED");
+      setStatus("DEMO MODE · DEPLOY WORKER FOR LIVE SCORES");
     }
   }
 

@@ -2,35 +2,69 @@
   "use strict";
 
   const API = "/api/football";
-  const BACKEND_TIMEOUT = 7000;
+  const BACKEND_TIMEOUT = 8000;
   const TZ = "Asia/Karachi";
   let liveFixtures = [];
-  let todayFixtures = [];
-  let injuriesLoaded = false;
 
   const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
   }[c]));
 
-  const today = () => new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit"
-  }).format(new Date());
-
   async function api(endpoint, params = {}) {
     const qs = new URLSearchParams({ endpoint, ...params });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), BACKEND_TIMEOUT);
-    let response;
     try {
-      response = await fetch(`${API}?${qs.toString()}`, { headers: { accept: "application/json" }, signal: controller.signal });
+      const response = await fetch(`${API}?${qs.toString()}`, {
+        headers: { accept: "application/json" },
+        signal: controller.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.errors && Object.keys(data.errors).length) {
+        throw new Error(data.message || data.error || JSON.stringify(data.errors || `HTTP ${response.status}`));
+      }
+      return data;
     } finally {
       clearTimeout(timer);
     }
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.errors && Object.keys(data.errors).length) {
-      throw new Error(data.message || data.error || JSON.stringify(data.errors || "API request failed"));
-    }
-    return data;
+  }
+
+  function rawLive(data) {
+    const value = data?.response?.live ?? data?.response ?? data?.live ?? [];
+    return Array.isArray(value) ? value : [];
+  }
+
+  function scoreParts(value) {
+    const match = String(value ?? "").match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
+    return match ? [Number(match[1]), Number(match[2])] : [null, null];
+  }
+
+  function normalizeMatch(m) {
+    const home = m?.home || {};
+    const away = m?.away || {};
+    const status = m?.status || {};
+    const liveTime = status?.liveTime || {};
+    const [homeScore, awayScore] = scoreParts(status?.scoreStr);
+    const minute = liveTime.short ?? liveTime.long ?? status?.short ?? "";
+    const isHalf = /^(HT|half)/i.test(String(minute));
+    const isFinished = /^(FT|AET|PEN)/i.test(String(minute));
+
+    return {
+      fixture: {
+        date: m?.time || m?.date || new Date().toISOString(),
+        status: {
+          short: isFinished ? "FT" : isHalf ? "HT" : "LIVE",
+          elapsed: typeof liveTime.minute === "number" ? liveTime.minute : null
+        }
+      },
+      teams: {
+        home: { name: home?.name || "Home", logo: home?.logo || home?.image || "" },
+        away: { name: away?.name || "Away", logo: away?.logo || away?.image || "" }
+      },
+      goals: { home: homeScore, away: awayScore },
+      league: { name: m?.league?.name || m?.tournament?.name || m?.competition?.name || "Live Football" },
+      _rapid: m
+    };
   }
 
   function statusText(fixture) {
@@ -38,10 +72,7 @@
     if (s.short === "HT") return "HT";
     if (s.short === "FT") return "FT";
     if (s.elapsed != null) return `${s.elapsed}'`;
-    if (s.short === "NS") {
-      return new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(fixture.fixture.date));
-    }
-    return s.short || "—";
+    return s.short || "LIVE";
   }
 
   function isLive(f) {
@@ -52,23 +83,23 @@
     const list = document.getElementById("matchList");
     if (!list) return;
     if (!items.length) {
-      list.innerHTML = '<div style="padding:22px;text-align:center;color:var(--muted);font-size:12px">No matches found for this period.</div>';
+      list.innerHTML = '<div style="padding:22px;text-align:center;color:var(--muted);font-size:12px">No live matches right now.</div>';
       return;
     }
 
     list.innerHTML = items.slice(0, 30).map((m) => {
       const home = m.teams?.home?.name || "Home";
       const away = m.teams?.away?.name || "Away";
-      const hs = m.goals?.home ?? 0;
-      const as = m.goals?.away ?? 0;
+      const hs = m.goals?.home;
+      const as = m.goals?.away;
       const live = isLive(m);
       const state = statusText(m);
       const league = m.league?.name || "Football";
       return `<div class="match-row" data-search="${esc(`${home} ${away} ${league}`.toLowerCase())}">
         <div class="match-time" style="color:${live ? 'var(--red)' : 'var(--muted)'}">${esc(state)}</div>
         <div class="teams">
-          <div class="team-line"><span>${esc(home)}</span><span>${m.goals?.home == null ? "—" : hs}</span></div>
-          <div class="team-line"><span>${esc(away)}</span><span>${m.goals?.away == null ? "—" : as}</span></div>
+          <div class="team-line"><span>${esc(home)}</span><span>${hs == null ? "—" : hs}</span></div>
+          <div class="team-line"><span>${esc(away)}</span><span>${as == null ? "—" : as}</span></div>
           <div class="league-label">${esc(league)}</div>
         </div><span>›</span>
       </div>`;
@@ -88,63 +119,57 @@
     }
 
     const live = isLive(match);
-    if (label) label.innerHTML = `<i></i> ${live ? "LIVE NOW" : "NEXT MATCH"}`;
+    if (label) label.innerHTML = `<i></i> ${live ? "LIVE NOW" : "LATEST LIVE DATA"}`;
     const home = match.teams?.home || {};
     const away = match.teams?.away || {};
-    const hs = match.goals?.home ?? 0;
-    const as = match.goals?.away ?? 0;
+    const hs = match.goals?.home;
+    const as = match.goals?.away;
     const hLogo = home.logo ? `<img src="${esc(home.logo)}" alt="" style="width:42px;height:42px;object-fit:contain">` : "H";
     const aLogo = away.logo ? `<img src="${esc(away.logo)}" alt="" style="width:42px;height:42px;object-fit:contain">` : "A";
     center.innerHTML = `<div><div class="club-badge">${hLogo}</div><div class="club-name">${esc(home.name || "Home")}</div></div>
-      <div><div class="score">${hs} : ${as}</div><div class="minute">${esc(statusText(match))}</div></div>
+      <div><div class="score">${hs == null ? "—" : hs} : ${as == null ? "—" : as}</div><div class="minute">${esc(statusText(match))}</div></div>
       <div><div class="club-badge">${aLogo}</div><div class="club-name">${esc(away.name || "Away")}</div></div>`;
+  }
+
+  function renderStandings(data) {
+    const box = document.querySelector("#leagues .standings");
+    if (!box) return;
+    const rows = data?.response?.standing ?? data?.response ?? data?.standing ?? [];
+    if (!Array.isArray(rows) || !rows.length) return;
+
+    const html = rows.slice(0, 20).map((t, i) => {
+      const rank = t.idx ?? t.rank ?? i + 1;
+      const name = t.name ?? t.team?.name ?? "Team";
+      const played = t.played ?? t.all?.played ?? t.p ?? "—";
+      const gd = t.goalConDiff ?? t.goalsDiff ?? t.gd ?? "—";
+      const pts = t.pts ?? t.points ?? "—";
+      return `<div class="stand-row"><b>${esc(rank)}</b><span>${esc(name)}</span><span>${esc(played)}</span><span>${esc(gd)}</span><b>${esc(pts)}</b></div>`;
+    }).join("");
+
+    box.innerHTML = '<div class="stand-row header"><span>#</span><span>TEAM</span><span>P</span><span>GD</span><span>PTS</span></div>' + html;
   }
 
   async function loadMatches() {
     try {
-      const [live, todayData] = await Promise.all([
-        api("football-current-live"),
-        api("football-current-live")
-      ]);
-      liveFixtures = live.response || [];
-      todayFixtures = todayData.response || [];
+      const data = await api("football-current-live");
+      liveFixtures = rawLive(data).map(normalizeMatch);
       renderLiveHero(liveFixtures);
-      renderMatches(todayFixtures.length ? todayFixtures : liveFixtures);
+      renderMatches(liveFixtures);
       setStatus(`LIVE DATA · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
     } catch (error) {
-      console.warn("SCORIVO football API:", error);
-      setStatus("DEMO MODE · CHECK RAPIDAPI / CLOUDFLARE SETUP");
+      console.warn("SCORIVO RapidAPI football:", error);
+      setStatus("API ERROR · CHECK CLOUDFLARE / RAPIDAPI");
+      renderLiveHero([]);
+      renderMatches([]);
     }
   }
 
-  async function loadInjuries() {
-    if (injuriesLoaded) return;
-    injuriesLoaded = true;
-    const box = document.querySelector("#injuries");
-    if (!box) return;
-    const container = box.querySelector(".injury-row")?.parentElement || box;
+  async function loadStandings() {
     try {
-      const data = await api("injuries", { date: today(), timezone: TZ });
-      const rows = data.response || [];
-      const existing = box.querySelectorAll(".injury-row");
-      existing.forEach((r) => r.remove());
-      if (!rows.length) {
-        box.insertAdjacentHTML("beforeend", '<div class="injury-row"><div class="mini-avatar">—</div><div><div class="injury-name">No injury data</div><div class="injury-type">No reported absences for this date.</div></div><div class="status fit">—</div></div>');
-        return;
-      }
-      rows.slice(0, 20).forEach((item) => {
-        const p = item.player || {};
-        const t = item.team || {};
-        const reason = p.reason || p.type || "Unavailable";
-        const type = p.type || "Missing fixture";
-        const initials = (p.name || "Player").split(/\s+/).map(x => x[0]).join("").slice(0,2).toUpperCase();
-        const status = /suspend/i.test(type) ? "SUSPENDED" : /question/i.test(type) ? "DOUBTFUL" : "OUT";
-        const cls = status === "DOUBTFUL" ? "doubt" : "out";
-        box.insertAdjacentHTML("beforeend", `<div class="injury-row"><div class="mini-avatar">${esc(initials)}</div><div><div class="injury-name">${esc(p.name || "Unknown player")}</div><div class="injury-type">${esc(t.name || "Unknown team")} · ${esc(reason)}</div></div><div class="status ${cls}">${status}</div></div>`);
-      });
+      const data = await api("football-get-standing-all", { leagueid: "47" });
+      renderStandings(data);
     } catch (error) {
-      console.warn("SCORIVO injuries:", error);
-      injuriesLoaded = false;
+      console.warn("SCORIVO standings:", error);
     }
   }
 
@@ -160,38 +185,23 @@
   }
 
   function setupSearch() {
-    const main = document.getElementById("mainSearch");
-    const top = document.getElementById("topSearch");
     const search = (value) => {
       const q = value.trim().toLowerCase();
       document.querySelectorAll("#matchList .match-row").forEach((row) => {
         row.style.display = !q || (row.dataset.search || "").includes(q) ? "grid" : "none";
       });
     };
-    main?.addEventListener("input", (e) => search(e.target.value));
-    top?.addEventListener("input", (e) => search(e.target.value));
+    document.getElementById("mainSearch")?.addEventListener("input", e => search(e.target.value));
+    document.getElementById("topSearch")?.addEventListener("input", e => search(e.target.value));
   }
 
-  function setupInjuryObserver() {
-    const target = document.getElementById("injuries");
-    if (!target || !("IntersectionObserver" in window)) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some(e => e.isIntersecting)) {
-        loadInjuries();
-        observer.disconnect();
-      }
-    }, { rootMargin: "300px" });
-    observer.observe(target);
-  }
-
-  window.SCORIVO = { api, refresh: loadMatches, loadInjuries };
+  window.SCORIVO = { api, refresh: loadMatches, loadStandings };
 
   document.addEventListener("DOMContentLoaded", () => {
     setupSearch();
-    setupInjuryObserver();
     loadMatches();
-    // API-Football recommends frequent polling for competitions that have live games.
-    // 60 seconds keeps the free 100-request/day plan from being exhausted by a single visitor.
+    loadStandings();
     setInterval(loadMatches, 60000);
+    setInterval(loadStandings, 300000);
   });
 })();

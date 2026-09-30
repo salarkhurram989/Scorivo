@@ -397,20 +397,7 @@
       clearTimeout(window.__toast); window.__toast = setTimeout(() => toast.classList.remove('show'), 2600);
     }
 
-    // ============================================================
-    // SCORIVO DATA API HOOK
-    // Replace the demo arrays below with data from a football API.
-    // Keep the UI functions and render the returned matches/injuries.
-    // Example shape:
-    // { home:'Team A', away:'Team B', homeScore:1, awayScore:0, minute:'67\'', league:'Premier League' }
-    // ============================================================
-    const scorivoConfig = {
-      apiBase: '', // Put your free football API endpoint here later.
-      apiKey: '',  // Never commit a private API key to a public repository.
-      refreshMs: 60000
-    };
 
-    console.log('SCORIVO ready. Live API connection can be added through scorivoConfig.');
   </script>
 </body>
 </html>

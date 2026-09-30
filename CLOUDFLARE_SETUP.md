@@ -1,69 +1,60 @@
-# SCORIVO — secure live football API setup
+# SCORIVO — secure RapidAPI live football setup
 
-SCORIVO now uses a Cloudflare Pages Advanced Mode Worker as a serverless proxy. The API-Football key is **never sent to the browser and is not stored in GitHub**.
+SCORIVO now uses the RapidAPI Free API Live Football Data service through a Cloudflare Pages Advanced Mode Worker. The RapidAPI key is never sent to the browser and is not stored in GitHub.
 
-## 1. Keep your API key private
+## RapidAPI endpoints
 
-Use the free API-Football plan. The current free plan is $0/month, includes the football endpoints, and has a 100 requests/day quota.
+- `football-current-live` — live matches
+- `football-get-standing-all` — standings
+- `get-search-all-players` — player search
 
-## 2. Create the Cloudflare Pages project
+## Cloudflare setup
 
-1. Open Cloudflare and go to **Workers & Pages**.
-2. Create a **Pages** project.
-3. Connect the GitHub repository `salarkhurram989/Scorivo`.
-4. Use the `main` branch.
-5. This is a plain static HTML site, so no framework/build command is required.
-6. Set the output directory to the repository root (`/`).
-7. Deploy the project.
+1. Connect `salarkhurram989/Scorivo` to Cloudflare Workers & Pages.
+2. Deploy the `main` branch.
+3. Use the repository root as the output directory.
+4. No framework or build command is required.
 
-The repository contains `_worker.js`, so Cloudflare Pages Advanced Mode will use it for the serverless API route while still serving the normal HTML/CSS/JS files.
+The repository's `_worker.js` handles `/api/football` and keeps the RapidAPI credential server-side.
 
-## 3. Add the secret
+## Add the secret
 
-In the Cloudflare Pages project:
+In Cloudflare Pages, add a **Secret** named:
 
-**Settings → Variables and Secrets → Add → Secret**
+`RAPIDAPI_KEY`
 
-Use exactly:
+Paste your RapidAPI key there.
 
-`API_FOOTBALL_KEY`
+Do not put the key in `index.html`, `scorivo-live.js`, GitHub source, or a public environment variable.
 
-Paste your API-Football key as the value, save it, and redeploy.
+## API route
 
-Do **not** put the key in `index.html`, `scorivo-live.js`, GitHub, or a public environment variable.
+SCORIVO calls:
 
-## 4. What the server provides
+`/api/football?endpoint=football-current-live`
 
-The Worker exposes only the routes SCORIVO needs through:
+The Worker forwards the request to:
 
-`/api/football?endpoint=fixtures&live=all`
+`https://free-api-live-football-data.p.rapidapi.com/football-current-live`
 
-`/api/football?endpoint=fixtures&date=YYYY-MM-DD`
+and adds the RapidAPI authentication headers server-side.
 
-`/api/football?endpoint=leagues...`
+## Test
 
-`/api/football?endpoint=teams...`
+After deployment:
 
-`/api/football?endpoint=standings...`
+`/api/health`
 
-`/api/football?endpoint=injuries...`
+should report `"keyConfigured": true`.
 
-It also supports fixture events, lineups, and player statistics.
+Then test:
 
-The API key is inserted server-side in the `x-apisports-key` header and is never returned to visitors.
+`/api/football?endpoint=football-current-live`
 
-## 5. Current SCORIVO behavior
+The response should contain the RapidAPI live-football data.
 
-- Live scores are requested from `/fixtures?live=all`.
-- Today's fixtures use the Asia/Karachi timezone.
-- The live hero card updates from real match data.
-- The match list updates from today's fixtures.
-- Injury data loads when the Injuries panel is brought into view.
-- The browser refreshes match data once per minute.
-- Cloudflare edge caching reduces repeated upstream requests.
+## Security
 
-## Important free-plan limitation
+The RapidAPI key previously pasted into chat should be revoked/regenerated before production use. Store the newly generated key only as the Cloudflare `RAPIDAPI_KEY` secret.
 
-API-Football's free plan currently allows 100 requests/day. A public website with many visitors can use that quota quickly. The Cloudflare cache helps, but it cannot make the upstream quota unlimited.
-
-The site is therefore designed to start safely on the free tier rather than polling every few seconds.
+The live client refreshes every 60 seconds and Cloudflare caches live responses briefly to reduce upstream requests.

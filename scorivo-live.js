@@ -103,8 +103,8 @@
   async function loadMatches() {
     try {
       const [live, todayData] = await Promise.all([
-        api("fixtures", { live: "all", timezone: TZ }),
-        api("fixtures", { date: today(), timezone: TZ })
+        api("football-current-live"),
+        api("football-current-live")
       ]);
       liveFixtures = live.response || [];
       todayFixtures = todayData.response || [];
@@ -113,7 +113,7 @@
       setStatus(`LIVE DATA · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`);
     } catch (error) {
       console.warn("SCORIVO football API:", error);
-      setStatus("DEMO MODE · DEPLOY WORKER FOR LIVE SCORES");
+      setStatus("DEMO MODE · CHECK RAPIDAPI / CLOUDFLARE SETUP");
     }
   }
 

@@ -1,6 +1,8 @@
-# SCORIVO — secure RapidAPI live football setup
+# SCORIVO — Vercel + RapidAPI setup
 
-SCORIVO now uses the RapidAPI Free API Live Football Data service through a Cloudflare Pages Advanced Mode Worker. The RapidAPI key is never sent to the browser and is not stored in GitHub.
+SCORIVO now uses **Vercel Serverless Functions** instead of the Cloudflare Worker.
+
+The RapidAPI key stays server-side as the Vercel environment variable `RAPIDAPI_KEY`. It is never placed in the frontend or GitHub source.
 
 ## RapidAPI endpoints
 
@@ -8,36 +10,21 @@ SCORIVO now uses the RapidAPI Free API Live Football Data service through a Clou
 - `football-get-standing-all` — standings
 - `get-search-all-players` — player search
 
-## Cloudflare setup
+## Vercel deployment
 
-1. Connect `salarkhurram989/Scorivo` to Cloudflare Workers & Pages.
-2. Deploy the `main` branch.
-3. Use the repository root as the output directory.
-4. No framework or build command is required.
+1. Import `salarkhurram989/Scorivo` into Vercel.
+2. Keep the repository root as the project root.
+3. No build command is required.
+4. Add an environment variable:
+   - Name: `RAPIDAPI_KEY`
+   - Value: your newly regenerated RapidAPI key
+5. Deploy.
 
-The repository's `_worker.js` handles `/api/football` and keeps the RapidAPI credential server-side.
-
-## Add the secret
-
-In Cloudflare Pages, add a **Secret** named:
-
-`RAPIDAPI_KEY`
-
-Paste your RapidAPI key there.
-
-Do not put the key in `index.html`, `scorivo-live.js`, GitHub source, or a public environment variable.
-
-## API route
-
-SCORIVO calls:
-
-`/api/football?endpoint=football-current-live`
-
-The Worker forwards the request to:
-
-`https://free-api-live-football-data.p.rapidapi.com/football-current-live`
-
-and adds the RapidAPI authentication headers server-side.
+The repository already contains:
+- `api/football.js` — secure RapidAPI proxy
+- `api/health.js` — configuration health check
+- `vercel.json` — serverless runtime configuration
+- `scorivo-live.js` — live match/standings client
 
 ## Test
 
@@ -45,16 +32,20 @@ After deployment:
 
 `/api/health`
 
-should report `"keyConfigured": true`.
+should return `"keyConfigured": true`.
 
-Then test:
+Then:
 
 `/api/football?endpoint=football-current-live`
 
-The response should contain the RapidAPI live-football data.
+should return the RapidAPI live-football response.
 
 ## Security
 
-The RapidAPI key previously pasted into chat should be revoked/regenerated before production use. Store the newly generated key only as the Cloudflare `RAPIDAPI_KEY` secret.
+Never put the RapidAPI key in `index.html`, `scorivo-live.js`, or any public environment variable.
 
-The live client refreshes every 60 seconds and Cloudflare caches live responses briefly to reduce upstream requests.
+The RapidAPI key previously pasted into chat should be revoked/regenerated before production use. Use only the newly generated key in Vercel's `RAPIDAPI_KEY` environment variable.
+
+## Local development
+
+If you run the project through Vercel's local development tooling, define `RAPIDAPI_KEY` in the local environment. A plain static file server will not execute `api/*.js`.
